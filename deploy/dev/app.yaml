@@ -1,0 +1,34 @@
+service:
+  name: myapp-app
+  port: 8080
+  dockerfile: Dockerfile
+  public_path: /*
+
+env:
+  APP_ENVIRONMENT: development
+
+secrets:
+  - rds:
+      DB_HOST: host
+      DB_PORT: port
+      DB_NAME: dbname
+      DB_USER: username
+      DB_PASSWORD: password
+  - app:
+      SECRET_KEY: SECRET_KEY
+      DATABASE_URL: DATABASE_URL
+
+resources:
+  cpu: 0.5
+  memory_gb: 1
+
+scaling:
+  min_instances: 1
+  max_instances: 10
+  cpu_target: 0.6
+
+health_check: /health
+
+monitoring:
+  dashboard: myapp
+  category: api

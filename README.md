@@ -130,6 +130,8 @@ terraform/
 
 Uncomment the ACM/Route53 variables in your tfvars to enable the ALB with HTTPS. You need a Route53 hosted zone for DNS validation.
 
-## License
+## Credits
 
-MIT
+Authors: **Clement VEROVE**
+
+Contacts: verove.clement@gmail.com

@@ -21,6 +21,7 @@ s3_buckets = ["assets"]
 # github_org          = "my-org"
 # github_repositories = ["my-repo"]
 
-app_image  = "public.ecr.aws/docker/library/busybox:latest"
-app_cpu    = 512
-app_memory = 1024
+app_image         = "public.ecr.aws/docker/library/busybox:latest"
+app_cpu           = 512
+app_memory        = 1024
+app_desired_count = 1

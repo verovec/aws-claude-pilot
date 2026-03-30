@@ -81,3 +81,8 @@ variable "app_memory" {
   type    = number
   default = 1024
 }
+
+variable "app_desired_count" {
+  type    = number
+  default = 1
+}

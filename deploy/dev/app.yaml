@@ -25,7 +25,10 @@ resources:
 scaling:
   min_instances: 1
   max_instances: 10
-  cpu_target: 0.6
+
+shutdown:
+  strategy: rolling
+  stop_timeout_sec: 30
 
 health_check: /health
 

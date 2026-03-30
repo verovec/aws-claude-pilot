@@ -175,7 +175,7 @@ module "app" {
   container_port  = 8080
   cpu             = var.app_cpu
   memory          = var.app_memory
-  desired_count   = 1
+  desired_count   = var.app_desired_count
 
   health_check_path         = "/health"
   health_check_start_period = 120

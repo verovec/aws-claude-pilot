@@ -18,6 +18,7 @@ variable "common_tags" {
 
 variable "placeholder_keys" {
   type        = list(string)
+  default     = []
   description = "Keys to seed in the initial JSON. All set to PLACEHOLDER."
 }
 

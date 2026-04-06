@@ -29,14 +29,15 @@ For the current component, collect all secret groups and env vars from **every**
 
 Collect every secret group name from all YAML files that is not `rds` and not `app`. This is the authoritative set of additional secrets for the component. Follow the **Additional Secret Module Detection** procedure in `agent/INFRA-AGENT.md` to:
 
-- **Add** any missing Terraform module, locals ARN, and secrets map entries for new additional secrets.
+- **Add** any missing Terraform module, locals ARN, and secrets map entries for new additional secrets. Warn for each new module:
+  > New secret module added: `<module_name>`. After `terraform apply`, use `/secrets` to set values before deploying.
 - **Remove** any additional-secret module blocks, locals ARN definitions, and secrets map entries in Terraform that are no longer referenced by any YAML file. Do not just warn -- delete the stale blocks.
 
-**2b. App secret module block (data-source)**
+**2b. App secret module block**
 
-The app-secret module is a data-source lookup. For each component, verify that a corresponding `module` block for the app secret exists in `main.tf`. If a new component appears but no matching module block exists, add the module block, then warn:
+The app-secret module creates a Secrets Manager secret with placeholder values. For each component, verify that a corresponding `module` block for the app secret exists in `main.tf`. If a new component appears but no matching module block exists, add the module block, then warn:
 
-> New secret referenced. Create it with `/secrets` before deploying.
+> New secret module added. After `terraform apply`, use `/secrets` to set values before deploying.
 
 **2c. Locals secrets map**
 

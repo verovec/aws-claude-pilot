@@ -116,7 +116,7 @@ Lists all secrets, lets you pick one to edit (or create a new one), opens a temp
 
 1. Reads YAML service descriptors
 2. Detects additional secret data-source modules (adds missing, removes stale)
-3. Fully replaces the component's secrets map from YAML (including version selectors)
+3. Fully replaces the component's secrets map from YAML
 4. Rebuilds the component's env map from YAML `env:` block (preserving known Terraform-expression vars)
 5. Generates/updates ECS service module blocks (CPU, memory, desired_count, health check, ALB, command)
 6. Updates `variables.tf` and `tfvars`

@@ -22,6 +22,8 @@ Append `--profile <profile> --region <region>` to every AWS CLI call below.
 
 Run: `aws secretsmanager list-secrets --filters Key=name,Values=<project>/<env_segment>`
 
+Parse the JSON response and build an **ordered list** of `(number, full_name)` pairs. Sort alphabetically by name. Assign numbers 1 through N. Store this mapping -- you MUST use it when the user picks a number.
+
 Display a numbered menu as a plain text message (do NOT use AskQuestion -- the list can exceed its option limit). Strip the `<project>/<env_segment>/` prefix from each name to keep it short -- the prefix is already shown in the header. Right-align dates. Pad numbers to the same width. Add a blank line before the create option.
 
 Format:
@@ -38,9 +40,11 @@ Secrets (<project>/<env_segment>/)
 
 Then ask the user as a plain text question: `Pick a number (0-N):` and wait for their typed response.
 
-**If creating new (0):** ask for the service name, derive path `<project>/<env_segment>/<name>/<name>-credentials`, confirm with user, then run `aws secretsmanager create-secret --name <path> --secret-string '{}'`. Use empty JSON `{}` as the baseline.
+**CRITICAL:** When the user picks a number, look up the **exact full secret name** from the ordered list built above. Do NOT re-derive or guess the name. Use the full name (including the `<project>/<env_segment>/` prefix) as `<full_path>` for all subsequent API calls.
 
-**If editing (1-N):** fetch the current value with `aws secretsmanager get-secret-value --secret-id <full_path>`. Parse `SecretString` as JSON. This is the baseline. Also save the `VersionId` from the response -- this is the **outgoing version ID** that will need a label after the push.
+**If creating new (0):** ask for the secret path relative to the environment prefix (e.g. `rds/app-credentials`, `redis-credentials`, `slack-webhooks`). The user provides the path after `<project>/<env_segment>/`. Derive the full path as `<project>/<env_segment>/<user_input>`. Confirm the full path with the user, then run `aws secretsmanager create-secret --name <full_path> --secret-string '{}'`. Use empty JSON `{}` as the baseline.
+
+**If editing (1-N):** fetch the current value with `aws secretsmanager get-secret-value --secret-id <full_path>` (where `<full_path>` is the exact name from the numbered list). Parse `SecretString` as JSON. This is the baseline. Also save the `VersionId` from the response -- this is the **outgoing version ID** that will need a label after the push.
 
 ## Open Editor
 

@@ -60,7 +60,7 @@ service:
   dockerfile: Dockerfile
 
 env:
-  APP_ENV: production
+  APP_ENVIRONMENT: production
 
 secrets:
   - rds:

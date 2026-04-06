@@ -20,9 +20,11 @@ Each component is a logical group of ECS services sharing the same YAML source d
 
 **Name Mapping:**
 
-| YAML service.name | Terraform module name | Variable suffix | YAML filename | Health check |
+| YAML service.name | Terraform module name | Variable prefix | YAML filename | Health check |
 |-|-|-|-|-|
 | myapp-app | app | app | app.yaml | /health |
+
+For single-service components the module name equals the prefix, so variables are `app_image`, `app_cpu`, etc. For multi-service components, suffix is appended: `<prefix>_<suffix>_image`.
 
 **Docker image tags:** Uses `app-latest`.
 
@@ -114,7 +116,7 @@ When `/sync` reads all YAML files for a component, it collects every secret grou
 
 The YAML group name (e.g. `celery-certs`) is converted to the Terraform identifier by replacing hyphens with underscores. The module name is `<prefix>_<group_name_underscored>`.
 
-Example: group name `celery-certs` yields module name `app_celery_certs` with Secrets Manager name `<project>-<env>-<service-name-prefix>-celery-certs`.
+Example: group name `celery-certs` yields module name `app_celery_certs` with `name = "<service-name-prefix>-celery-certs"`. The resulting Secrets Manager path is `<project>/<env>/<service-name-prefix>-celery-certs/<service-name-prefix>-celery-certs-credentials`.
 
 **For each additional secret, `/sync` ensures:**
 

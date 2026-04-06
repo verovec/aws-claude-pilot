@@ -2,7 +2,7 @@ service:
   name: myapp-app
   port: 8080
   dockerfile: Dockerfile
-  public_path: /*
+  public_path: /
 
 env:
   APP_ENVIRONMENT: development

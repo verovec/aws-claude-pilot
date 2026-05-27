@@ -64,11 +64,11 @@ All paths relative to `terraform/`.
 **In scope** (generated/updated by `/sync`):
 - `module "<prefix>_secret"` -- app secret resource (creates with placeholders); `/sync` verifies block exists
 - `module "<prefix>_<additional_secret>"` -- additional secret modules (auto-managed by `/sync`, see Additional Secret Module Detection)
-- `locals` block -- `<prefix>_secrets` map reconciled by `/sync` from YAML secret mappings (union of all YAML files); `<prefix>_env` map reconciled by `/sync` from YAML `env` sections (union of all YAML files, known TF-expression vars preserved); ARN definitions manually maintained
+- `locals` block -- `<prefix>_secrets` map reconciled by `/sync` from YAML secret mappings (union of all YAML files); `<prefix>_env` map reconciled by `/sync` from YAML `env` sections (union of all YAML files, known TF-expression vars preserved); `<prefix>_<group>_version_ref` locals (one per secret group, see Secret Version Selectors); ARN definitions manually maintained
 - `module "<prefix>_*"` -- ECS service module blocks (generated)
 - `module "<prefix>_monitoring"` or `module "monitoring"` -- `ecs_services` map (regenerated)
-- `variables.tf` -- service image/cpu/memory/desired_count variables
-- `environments/<env>.tfvars` -- service variable values
+- `variables.tf` -- service image/cpu/memory/desired_count variables; `<prefix>_<group>_secret_version` variables (one per secret group)
+- `environments/<env>.tfvars` -- service variable values; `<prefix>_<group>_secret_version` assignments (one per secret group, transcribed verbatim from each YAML's `secrets[].<group>.version`)
 
 **Out of scope** (never touch):
 - `module "kms"`, `module "vpc"`, `module "ecs"`, `module "iam"` -- shared platform
@@ -270,13 +270,19 @@ env:
 
 secrets:
   - rds:                       # maps to RDS credentials secret
-      DB_HOST: host
-      DB_PORT: port
-      DB_PASSWORD: password
+      version: <uuid|AWSCURRENT>   # pinned VersionId; updated by /secrets on push
+      keys:
+        DB_HOST: host
+        DB_PORT: port
+        DB_PASSWORD: password
   - app:                       # maps to app secret module
-      SECRET_KEY: SECRET_KEY
+      version: <uuid|AWSCURRENT>
+      keys:
+        SECRET_KEY: SECRET_KEY
   - <additional-name>:         # maps to additional secret module (auto-managed)
-      ENV_VAR: json_key
+      version: <uuid|AWSCURRENT>
+      keys:
+        ENV_VAR: json_key
 
 resources:
   cpu: <vcpu>
@@ -307,7 +313,48 @@ The `secrets` section uses short group names that `/sync` maps to Terraform reso
 | `app` | `module.<prefix>_secret.secret_arn` | `local.<prefix>_app_secret_arn` |
 | `<custom>` | `module.<prefix>_<custom>.secret_arn` | `local.<prefix>_<custom>_secret_arn` |
 
-Each mapping (`ENV_VAR: json_key`) becomes an entry in the component's `local.<prefix>_secrets` map with the format `${arn}:json_key::`.
+Each mapping under `<group>.keys` (`ENV_VAR: json_key`) becomes an entry in the component's `local.<prefix>_secrets` map with the format `${arn}:json_key:${version_ref}` (see Secret Version Selectors below for `version_ref`).
+
+### Secret Version Selectors
+
+Every secret group in YAML carries a `version:` field next to its `keys:` map. This pins the ECS task definition to a specific Secrets Manager `VersionId` so that secret rotations are git-tracked, deterministic, and roll out via `terraform apply` rather than `--force-new-deployment`.
+
+**YAML is the source of truth.** `/secrets` writes the new `VersionId` into the YAML on push. `/sync` transcribes that value into `environments/<env>.tfvars` verbatim. `terraform apply` then updates the ECS task definition, which triggers a natural redeploy.
+
+**Allowed `version` values:**
+
+- A 36-char UUID `VersionId` returned by Secrets Manager (the standard case after `/secrets` has been run at least once).
+- A staging label such as `AWSCURRENT` (floating -- the task definition will not change when the secret rotates, so a redeploy is needed to pick up new values). `/sync` warns whenever it sees a non-UUID value.
+
+**Terraform constructs (per secret group, per component):**
+
+1. **Variable** in `variables.tf`:
+   ```hcl
+   variable "<prefix>_<group>_secret_version" {
+     type        = string
+     default     = "AWSCURRENT"
+     description = "VersionId for <prefix> <group> secret. Pinned by /secrets, propagated by /sync."
+   }
+   ```
+
+2. **`version_ref` local** in the component's locals block (placed after ARN definitions, before the env map):
+   ```hcl
+   <prefix>_<group>_version_ref = can(regex("^[0-9a-f]{8}-", var.<prefix>_<group>_secret_version)) ? ":${var.<prefix>_<group>_secret_version}" : "${var.<prefix>_<group>_secret_version}:"
+   ```
+   The regex detects a UUID prefix. UUIDs are written as the **version-id** fragment (`:<uuid>`); staging labels are written as the **version-stage** fragment (`<label>:`). The ECS `secrets[]` value format is `arn:json-key:version-stage:version-id`, so exactly one of the two trailing slots is populated.
+
+3. **Secrets map entry** using `version_ref`:
+   ```hcl
+   <ENV_VAR> = "${local.<prefix>_<arn_local>}:<json_key>:${local.<prefix>_<group>_version_ref}"
+   ```
+
+4. **tfvars assignment** in `environments/<env>.tfvars`:
+   ```hcl
+   <prefix>_<group>_secret_version = "<value from that env's YAML>"
+   ```
+   `/sync` always writes this -- even when the value is `AWSCURRENT`. If multiple YAML files in the same component+env disagree on the version, `/sync` warns and uses the majority.
+
+The `<group>` segment in identifiers is the YAML group name with hyphens replaced by underscores (same rule as the `<additional_secret>` module name).
 
 ### Env Section
 
@@ -315,7 +362,7 @@ The `env` section contains direct environment variables (non-secret values). `/s
 
 ## Secrets Architecture
 
-The `locals` block for each component has three parts:
+The `locals` block for each component has four parts:
 
 1. **ARN definitions** (manually maintained) -- reference Terraform module outputs:
    ```hcl
@@ -323,21 +370,27 @@ The `locals` block for each component has three parts:
    <prefix>_app_secret_arn = module.<prefix>_secret.secret_arn
    ```
 
-2. **Env map** (reconciled by `/sync` from YAML `env` sections) -- direct environment variables:
+2. **Version-ref locals** (reconciled by `/sync` -- one per secret group). See Secret Version Selectors for the regex pattern:
+   ```hcl
+   <prefix>_rds_version_ref = can(regex("^[0-9a-f]{8}-", var.<prefix>_rds_secret_version)) ? ":${var.<prefix>_rds_secret_version}" : "${var.<prefix>_rds_secret_version}:"
+   <prefix>_app_version_ref = can(regex("^[0-9a-f]{8}-", var.<prefix>_app_secret_version)) ? ":${var.<prefix>_app_secret_version}" : "${var.<prefix>_app_secret_version}:"
+   ```
+
+3. **Env map** (reconciled by `/sync` from YAML `env` sections) -- direct environment variables:
    ```hcl
    <prefix>_env = {
      KEY = "value"
    }
    ```
 
-3. **Secrets map** (reconciled by `/sync` from YAML `secrets` sections) -- ECS secret references:
+4. **Secrets map** (reconciled by `/sync` from YAML `secrets` sections) -- ECS secret references, every entry pinned via `version_ref`:
    ```hcl
    <prefix>_secrets = merge(
      local.<prefix>_rds_secret_arn != "" ? {
-       DB_HOST = "${local.<prefix>_rds_secret_arn}:host::"
+       DB_HOST = "${local.<prefix>_rds_secret_arn}:host:${local.<prefix>_rds_version_ref}"
      } : {},
      {
-       SECRET_KEY = "${local.<prefix>_app_secret_arn}:SECRET_KEY::"
+       SECRET_KEY = "${local.<prefix>_app_secret_arn}:SECRET_KEY:${local.<prefix>_app_version_ref}"
      }
    )
    ```
@@ -356,18 +409,26 @@ One unified command manages secret **values** in AWS Secrets Manager. It is sepa
 | Secret lifecycle (creation with placeholders) | Terraform via `app-secret` module | `terraform apply` |
 | Secret values (editing actual credentials) | Developer via `/secrets` | `aws secretsmanager put-secret-value` |
 
-### Value Updates Do Not Require Redeploy
+### Value Updates Are Deterministic and Git-Tracked
 
-ECS tasks fetch secret values from Secrets Manager at task launch. Updating a value via `/secrets` takes effect on the next ECS task start. No `terraform apply` needed for value-only changes.
+ECS tasks fetch secret values from Secrets Manager at task launch, using the `VersionId` baked into their task definition. Updating a value via `/secrets` produces a new `VersionId`, which `/secrets` writes into the YAML's `secrets[].<group>.version` field. The change reaches ECS only after `/sync` propagates the new version into tfvars and `terraform apply` updates the task definition.
 
-### Structural Changes Require `/sync`
+The full happy-path flow for a value-only update:
+
+1. `/secrets <env>` -- edit values, push, get a new `VersionId`. `/secrets` writes the new VersionId into every YAML file referencing that secret path.
+2. `/sync` -- transcribes the YAML version into `environments/<env>.tfvars` (`<prefix>_<group>_secret_version = "<uuid>"`).
+3. `terraform apply` -- the changed tfvars cause the secrets map entries (which use `version_ref`) to render a new ECS task definition; ECS performs a rolling deployment.
+
+This means rollback is `git revert` + `terraform apply`. There is no `aws ecs update-service --force-new-deployment` in the happy path.
+
+### Structural Changes Require `/sync` Too
 
 Adding or removing a secret **key** (not just changing its value) requires:
-1. Update the YAML descriptors in `deploy/<env>/` to reference the new/removed key
-2. `/sync` -- reconciles Terraform secret modules, secrets map, and env map from YAML
-3. `terraform apply` -- creates any new secret modules (with placeholders)
-4. `/secrets` -- set actual values for new or updated keys
-5. ECS reload or new deployment to pick up the changes
+1. Update the YAML descriptors in `deploy/<env>/` to reference the new/removed key under `secrets[].<group>.keys`.
+2. `/sync` -- reconciles Terraform secret modules, secrets map, env map, version variables, and version-ref locals from YAML.
+3. `terraform apply` -- creates any new secret modules (with placeholders).
+4. `/secrets` -- set actual values for new keys; `/secrets` then pins the new VersionId back into the YAML.
+5. `/sync` + `terraform apply` again to roll the new VersionId out to ECS.
 
 ## Monitoring Module
 

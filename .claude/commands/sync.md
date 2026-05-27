@@ -23,7 +23,7 @@ For the current component and environment:
 
 ### 2. Variable reconciliation
 
-For the current component, collect all secret groups and env vars from **every** YAML file. Steps 2a-2d reconcile the four parts of the component's locals block: secret modules, secrets map, and env map. YAML files are the source of truth -- the union of all YAML files for the component determines what must exist in Terraform.
+For the current component, collect all secret groups, version selectors, and env vars from **every** YAML file. Steps 2a-2e reconcile the component's locals block (ARN definitions, version-ref locals, secrets map, env map), the secret modules, and the per-group `<prefix>_<group>_secret_version` variables and tfvars assignments. YAML files are the source of truth -- the union of all YAML files for the component determines what must exist in Terraform.
 
 **2a. Additional secret module detection**
 
@@ -39,24 +39,43 @@ The app-secret module creates a Secrets Manager secret with placeholder values. 
 
 > New secret module added. After `terraform apply`, use `/secrets` to set values before deploying.
 
-**2c. Locals secrets map**
+**2c. Per-group version variables, tfvars, and `version_ref` locals**
 
-Build the expected `local.<prefix>_secrets` map by reading **every** YAML file for the component and collecting **every** `ENV_VAR: json_key` mapping from **every** secret group (rds, app, and additional). This is the full union -- a key declared in any single YAML file must appear in the shared secrets map.
+For each unique secret group present in the component's YAML (`rds`, `app`, or any additional group):
 
-For each secret group in YAML, determine the corresponding locals ARN variable:
-- `rds` group -> `local.<prefix>_rds_secret_arn`
-- `app` group -> `local.<prefix>_app_secret_arn`
-- Additional secret -> `local.<prefix>_<group_name>_secret_arn`
+1. **Variable** in `variables.tf` -- ensure `variable "<prefix>_<group>_secret_version"` exists, type `string`, default `"AWSCURRENT"`. Add if missing. Remove if the group is no longer referenced by any YAML file in the component.
 
-The ECS secret reference format is `arn:json_key:version_stage:version_id`. By default, use empty version stage and version ID (fetches AWSCURRENT):
+2. **`version_ref` local** in the component's locals block (placed after the ARN definitions, before the env map):
+   ```hcl
+   <prefix>_<group>_version_ref = can(regex("^[0-9a-f]{8}-", var.<prefix>_<group>_secret_version)) ? ":${var.<prefix>_<group>_secret_version}" : "${var.<prefix>_<group>_secret_version}:"
+   ```
+   The `<group>` segment is the YAML group name with hyphens replaced by underscores. Add if missing; remove if the group is no longer referenced.
+
+3. **tfvars assignment** -- write `<prefix>_<group>_secret_version = "<value>"` to `environments/<env>.tfvars`, where `<value>` is the `version` field read from that environment's YAML for this group. **Always write the assignment** -- even when the value is `AWSCURRENT`. The YAML value is sacred and must be transcribed verbatim.
+
+   If the same group appears in multiple YAML files for the same component+env with **different** `version` values, warn and use the majority.
+
+   If the `version` value is anything other than a 36-char UUID (e.g. `AWSCURRENT`, `AWSPREVIOUS`, or any staging label), print:
+   > WARNING: `<yaml_file>` uses staging label `"<label>"` for the `<group>` secret instead of a pinned VersionId. ECS task definitions will not change when this secret rotates, so updates require a forced redeploy. Run `/secrets <env>` to pin a VersionId.
+
+**2d. Locals secrets map**
+
+Build the expected `local.<prefix>_secrets` map by reading **every** YAML file for the component and collecting **every** `ENV_VAR: json_key` mapping from **every** secret group's `keys:` sub-map (`rds`, `app`, and any additional). This is the full union -- a key declared in any single YAML file must appear in the shared secrets map.
+
+For each secret group in YAML, determine the corresponding ARN local and version-ref local:
+- `rds` group -> ARN `local.<prefix>_rds_secret_arn`, version-ref `local.<prefix>_rds_version_ref`
+- `app` group -> ARN `local.<prefix>_app_secret_arn`, version-ref `local.<prefix>_app_version_ref`
+- Additional secret -> ARN `local.<prefix>_<group>_secret_arn`, version-ref `local.<prefix>_<group>_version_ref`
+
+The ECS secret reference format is `arn:json_key:version_stage:version_id`. Every entry pins the version via `version_ref`:
 
 ```
-<ENV_VAR> = "${local.<prefix>_<arn_local>}:<json_key>::"
+<ENV_VAR> = "${local.<prefix>_<arn_local>}:<json_key>:${local.<prefix>_<group>_version_ref}"
 ```
 
 **Replace** the entire `local.<prefix>_secrets` map in `main.tf` with the full union built from YAML. This is a complete overwrite -- the YAML secrets sections are the single source of truth. Any entry that was in Terraform but is no longer declared in any YAML file is removed. Any entry in YAML that was missing from Terraform is added.
 
-**2d. Locals env map**
+**2e. Locals env map**
 
 Build the expected `local.<prefix>_env` map by reading **every** YAML file for the component and collecting **every** key from the `env` section. Take the union of all keys across all YAML files.
 
@@ -108,7 +127,7 @@ Compare generated modules against current `main.tf`:
 - **Changed YAML** (module exists, params differ) -- update module block
 - **Removed YAML** (module exists, no YAML) -- comment out with a note
 
-Respect the scope boundary: only touch the component's service modules, variables, tfvars, the `ecs_services` map in its monitoring module, the `<prefix>_secrets` map (step 2c -- full replace from YAML), the `<prefix>_env` map (step 2d -- full rebuild), and additional secret modules managed by step 2a.
+Respect the scope boundary: only touch the component's service modules, variables, tfvars, the `ecs_services` map in its monitoring module, the `<prefix>_<group>_secret_version` variables and tfvars assignments and `<prefix>_<group>_version_ref` locals (step 2c -- reconciled per group), the `<prefix>_secrets` map (step 2d -- full replace from YAML), the `<prefix>_env` map (step 2e -- full rebuild), and additional secret modules managed by step 2a.
 
 ### 7. Apply or dry-run
 
@@ -132,6 +151,8 @@ Then one-line summaries:
 > Monitoring module: all N entries present with correct categories.
 
 > Secrets map: N entries (M added, K removed).
+
+> Secret versions: N groups pinned to UUIDs, M floating on staging labels (warned).
 
 > Env map: N entries (M added, K removed, J known TF-expression vars preserved).
 

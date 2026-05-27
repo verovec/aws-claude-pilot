@@ -64,10 +64,14 @@ env:
 
 secrets:
   - rds:
-      DB_HOST: host
-      DB_PASSWORD: password
+      version: AWSCURRENT       # pinned to a UUID by /secrets after first push
+      keys:
+        DB_HOST: host
+        DB_PASSWORD: password
   - app:
-      SECRET_KEY: SECRET_KEY
+      version: AWSCURRENT
+      keys:
+        SECRET_KEY: SECRET_KEY
 
 resources:
   cpu: 1

@@ -79,7 +79,9 @@ Build the new JSON object from the file content and push immediately:
 
 `aws secretsmanager put-secret-value --secret-id <full_path> --secret-string '<json>'`
 
-If keys were added or removed, remind: "Structural change -- update YAML descriptors and run `/sync`."
+Save the `VersionId` from the response -- this is the **new VersionId** that will be pinned into the YAML below.
+
+If keys were added or removed, remind: "Structural change -- update YAML `keys:` and run `/sync`."
 
 ## Version Labeling
 
@@ -104,38 +106,77 @@ Labeled previous version: <outgoing_version_id> -> v-<timestamp>
 
 Skip this step for new secrets (option 0) since there is no outgoing version.
 
-## ECS Reload
+## YAML Version Pin
 
-Scan YAML deploy files to find services referencing this secret. For each YAML file in the component's deploy directories, read the file and check if the secret group name appears in its `secrets` section. Collect the `service.name` value from matching files.
+The secret value has been pushed and the previous version is labeled. The next step is to pin the new `VersionId` into the YAML descriptors so that `/sync` + `terraform apply` rolls it out to ECS deterministically. There is no `aws ecs update-service --force-new-deployment` in this flow -- the redeploy is driven by the changed task definition.
 
-Component YAML directories (use the short env name: dev/staging/prod):
-- `deploy/<env_short>/*.yaml`
+**Derive the secret group name from `<full_path>`:**
 
-If matches found, display a clear menu:
+The pilot's YAML uses short group keys (e.g. `rds`, `app`, `redis`), not full Secrets Manager paths. Map `<full_path>` to a group as follows:
+
+| `<full_path>` shape | YAML group |
+|-|-|
+| `<project>/<env_segment>/rds/<key>-credentials` | `rds` |
+| `<project>/<env_segment>/<service-prefix>/<service-prefix>-credentials` | `app` |
+| `<project>/<env_segment>/<service-prefix>-<suffix>/<service-prefix>-<suffix>-credentials` | `<suffix>` (with hyphens preserved in YAML group key) |
+| anything else | derive the group by stripping `<project>/<env_segment>/` and using the leading path segment |
+
+If the shape is ambiguous, ask the user which YAML group name this secret corresponds to before proceeding.
+
+**Scan and update YAML files:**
+
+For each `deploy/<env_short>/*.yaml`:
+
+1. Read the file. Locate the `secrets:` list entry whose key matches the derived group name. If absent, skip the file -- this service does not reference the pushed secret.
+
+2. **Validate the existing `version:` field.** Compare it against the **outgoing `VersionId`** (saved during "List and Select"). If they differ, print:
+   > YAML was stale (`<yaml_file>`: `<group>` had `<yaml_value>`, expected `<outgoing_version_id>`). Overwriting with new VersionId.
+
+   "Stale" is normal when someone bypassed `/secrets` or when a previous `/secrets` run was aborted; it is not fatal.
+
+3. **Write the new `VersionId`** from the `put-secret-value` response into the `version:` field for that group. The value must always be a UUID -- never `AWSCURRENT` or another staging label. Use the Write/Edit tools (not shell `sed`), so values are not shell-escaped.
+
+4. **Reconcile `keys:`** -- if the push added or removed JSON keys at the Secrets Manager level, point this out but do **not** mutate the YAML `keys:` map yourself. Key changes are structural and belong in the developer's PR alongside the application code that uses them. Print:
+   > Structural change in `<group>`: keys added=[...], removed=[...]. Update YAML `secrets[].<group>.keys:` to match, then run `/sync`.
+
+5. **Refresh sibling-group versions in the same file.** For every other secret group in the same YAML file (i.e. groups not pushed in this run), look up the current `VersionId` in AWS:
+   ```
+   aws secretsmanager describe-secret --secret-id <sibling_full_path> --query VersionIdsToStages --output json
+   ```
+   Pick the VersionId whose stages array contains `AWSCURRENT`. If the YAML's `version:` value for that sibling group differs from the current AWSCURRENT, replace it and print:
+   > Also pinned `<yaml_file>`: `<sibling_group>` (`<old_value>` -> `<current_version_id>`).
+
+   This is what keeps the YAML self-consistent: a single `/secrets` run leaves no group in the same file pointing at a stale version.
+
+6. Show a per-file diff of YAML changes.
+
+If any YAML files were modified, print:
 
 ```
-N services use this secret. Reload to pick up changes?
-
-  1. myapp-api
-  2. myapp-worker
-  ...
-
-  a. Reload ALL
-  s. Skip
-
-Pick services (e.g. 1,3) or a/s:
+YAML pinned. Next: run /sync && terraform apply -var-file=environments/<env_short>.tfvars
 ```
 
-For selected services, run `aws ecs update-service --cluster <project>-<env_segment> --service <name> --force-new-deployment`. Do NOT wait for stable.
+If no YAML files reference this secret group, print:
+
+```
+No YAML files in deploy/<env_short>/ reference the `<group>` secret. Nothing to pin.
+```
+
+For new secrets (option 0), there is nothing to pin yet -- the secret has no consumers in YAML. Print:
+
+```
+New secret created. Add it to a YAML descriptor under `secrets:` with `version: <new_version_id>` and `keys: {...}`, then run /sync.
+```
 
 ## Final Output
 
-After everything is done (push completed, version labeled, ECS reload handled or skipped), always print a final summary block:
+After push, version labeling, and YAML pinning, always print a final summary block:
 
 ```
 Secret:   <full_path>
-Version:  <version_id from put-secret-value response> (AWSCURRENT)
+Version:  <version_id from put-secret-value response> (AWSCURRENT, pinned in YAML)
 Previous: <outgoing_version_id> (v-<timestamp>)
+YAML:     <N> file(s) updated -- run /sync && terraform apply
 ```
 
 For new secrets (created via option 0), print:
@@ -143,6 +184,7 @@ For new secrets (created via option 0), print:
 ```
 Secret:  <full_path>
 Version: <version_id> (initial)
+YAML:    not yet referenced -- add a `secrets:` entry and run /sync
 ```
 
 ## Rules

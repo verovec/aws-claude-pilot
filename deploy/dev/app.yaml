@@ -9,14 +9,18 @@ env:
 
 secrets:
   - rds:
-      DB_HOST: host
-      DB_PORT: port
-      DB_NAME: dbname
-      DB_USER: username
-      DB_PASSWORD: password
+      version: AWSCURRENT
+      keys:
+        DB_HOST: host
+        DB_PORT: port
+        DB_NAME: dbname
+        DB_USER: username
+        DB_PASSWORD: password
   - app:
-      SECRET_KEY: SECRET_KEY
-      DATABASE_URL: DATABASE_URL
+      version: AWSCURRENT
+      keys:
+        SECRET_KEY: SECRET_KEY
+        DATABASE_URL: DATABASE_URL
 
 resources:
   cpu: 0.5

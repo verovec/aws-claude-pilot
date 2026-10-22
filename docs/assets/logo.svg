@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160" role="img" aria-labelledby="title">
+  <title id="title">aws-claude-pilot</title>
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="40%" r="65%">
+      <stop offset="0" stop-color="#2a2340"/>
+      <stop offset="1" stop-color="#0b1220"/>
+    </radialGradient>
+    <linearGradient id="orange" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fdba74"/>
+      <stop offset="1" stop-color="#fb923c"/>
+    </linearGradient>
+    <clipPath id="disc"><circle cx="80" cy="80" r="74"/></clipPath>
+  </defs>
+  <circle cx="80" cy="80" r="74" fill="url(#bg)"/>
+  <g clip-path="url(#disc)" fill="none" stroke="#fb923c" stroke-opacity="0.16" stroke-width="1.2">
+    <path d="M0 118 C20 112 30 124 50 118 S80 112 100 118 S140 124 160 118"/>
+    <path d="M0 132 C20 126 30 138 50 132 S80 126 100 132 S140 138 160 132"/>
+    <path d="M0 146 C20 140 30 152 50 146 S80 140 100 146 S140 152 160 146"/>
+    <path d="M0 30 C20 24 30 36 50 30 S80 24 100 30 S140 36 160 30"/>
+  </g>
+  <path d="M100 66 H95 A28 28 0 1 0 68 102 H100 A18 18 0 0 0 100 66 Z"
+        fill="#f8fafc" fill-opacity="0.08" stroke="#f8fafc" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M60 128 C72 126 84 122 98 116" fill="none" stroke="url(#orange)" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="3 5"/>
+  <g fill="url(#orange)" stroke="#0b1220" stroke-width="1.5" stroke-linejoin="round">
+    <path d="M100 116 L134 96 L122 130 L113 118 Z"/>
+    <path d="M113 118 L134 96" fill="none" stroke="#0b1220" stroke-width="1.5"/>
+  </g>
+  <circle cx="80" cy="80" r="74" fill="none" stroke="#fb923c" stroke-opacity="0.35" stroke-width="2"/>
+</svg>
